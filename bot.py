@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 
 from football_api import FootballAPI, FreeFootballAPI
 from analyzer import FootballAnalyzer
+from bet_tracker import BetTracker
+from odds_scraper import OddsScraper
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -36,6 +38,8 @@ class FootballBettingBot:
             logger.warning("Using mock API data")
         
         self.analyzer = FootballAnalyzer(self.api)
+        self.bet_tracker = BetTracker()
+        self.odds_scraper = OddsScraper()
         
         # Хранилище для пользовательских настроек
         self.user_preferences = {}
@@ -50,6 +54,7 @@ class FootballBettingBot:
 
 🔹 /matches - Получить анализ матчей на завтра
 🔹 /today - Матчи на сегодня
+🔹 /stats - Статистика ставок за вчера
 🔹 /settings - Настройки бота
 🔹 /help - Помощь
 
@@ -66,6 +71,7 @@ class FootballBettingBot:
         keyboard = [
             [InlineKeyboardButton("⚽️ Матчи на завтра", callback_data="tomorrow_matches")],
             [InlineKeyboardButton("📅 Матчи на сегодня", callback_data="today_matches")],
+            [InlineKeyboardButton("📊 Статистика", callback_data="statistics")],
             [InlineKeyboardButton("⚙️ Настройки", callback_data="settings")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -113,6 +119,10 @@ class FootballBettingBot:
         """Обработчик команды /today"""
         await self.send_matches_analysis(update, context, days_ahead=0)
     
+    async def get_statistics_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик команды /stats"""
+        await self.send_betting_statistics(update, context)
+    
     async def send_matches_analysis(self, update: Update, context: ContextTypes.DEFAULT_TYPE, days_ahead: int = 1):
         """Отправляет анализ матчей"""
         chat_id = update.effective_chat.id
@@ -139,6 +149,24 @@ class FootballBettingBot:
             for i, match in enumerate(matches[:5]):
                 try:
                     analysis = await self.analyzer.analyze_match(match)
+                    
+                    # Получаем коэффициенты
+                    home_team = match['homeTeam']['name']
+                    away_team = match['awayTeam']['name']
+                    odds_data = self.odds_scraper.get_mock_odds(home_team, away_team)
+                    
+                    # Генерируем рекомендации с коэффициентами
+                    enhanced_recommendations = self.odds_scraper.generate_betting_recommendations(
+                        odds_data, analysis['betting_analysis']
+                    )
+                    
+                    # Добавляем коэффициенты и улучшенные рекомендации к анализу
+                    analysis['odds_data'] = odds_data
+                    analysis['enhanced_recommendations'] = enhanced_recommendations
+                    
+                    # Сохраняем прогноз для отслеживания
+                    self.bet_tracker.save_prediction(match, analysis['betting_analysis'], odds_data)
+                    
                     analyzed_matches.append(analysis)
                 except Exception as e:
                     logger.error(f"Error analyzing match {i}: {e}")
@@ -213,13 +241,23 @@ class FootballBettingBot:
         text += f"⚽️ Тотал >2.5: {betting['over_2_5_prob']}%\n"
         text += f"🎯 Обе забьют: {betting['btts_prob']}%\n\n"
         
-        # Рекомендации
-        if analysis['recommendations']:
-            text += f"💡 *Рекомендации:*\n"
+        # Рекомендации с коэффициентами
+        enhanced_recs = analysis.get('enhanced_recommendations', [])
+        if enhanced_recs:
+            text += f"💡 *Рекомендации с коэффициентами:*\n"
+            for rec in enhanced_recs:
+                text += f"• {rec}\n"
+        elif analysis['recommendations']:
+            text += f"💡 *Общие рекомендации:*\n"
             for rec in analysis['recommendations']:
                 text += f"• {rec}\n"
         else:
             text += f"💡 *Рекомендации:* Матч сложно прогнозируемый\n"
+        
+        # Добавляем коэффициенты
+        odds_display = self.odds_scraper.format_odds_display(analysis.get('odds_data', {}))
+        if odds_display:
+            text += odds_display
         
         # Уверенность
         confidence = analysis['confidence_score']
@@ -238,11 +276,48 @@ class FootballBettingBot:
             await self.send_matches_analysis(update, context, days_ahead=1)
         elif data == "today_matches":
             await self.send_matches_analysis(update, context, days_ahead=0)
+        elif data == "statistics":
+            await self.send_betting_statistics(update, context)
         elif data == "settings":
             await self.show_settings(update, context)
         elif data.startswith("details_"):
             match_id = data.split("_")[1]
             await query.edit_message_text("📊 Подробная статистика пока в разработке!")
+    
+    async def send_betting_statistics(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Отправляет статистику ставок"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем результаты ставок
+            await self.bet_tracker.check_pending_results()
+            
+            # Генерируем статистику за вчера
+            stats = self.bet_tracker.generate_daily_statistics()
+            
+            # Форматируем отчет
+            report = self.bet_tracker.format_daily_report(stats)
+            
+            if update.callback_query:
+                await update.callback_query.edit_message_text(
+                    report, 
+                    parse_mode='Markdown'
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id, 
+                    report, 
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in send_betting_statistics: {e}")
+            error_msg = f"❌ Ошибка при получении статистики: {e}"
+            
+            if update.callback_query:
+                await update.callback_query.edit_message_text(error_msg)
+            else:
+                await context.bot.send_message(chat_id, error_msg)
     
     async def show_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Показывает настройки бота"""
@@ -293,6 +368,7 @@ _Функции настроек будут добавлены в следующ
         app.add_handler(CommandHandler("help", self.help_command))
         app.add_handler(CommandHandler("matches", self.get_matches_command))
         app.add_handler(CommandHandler("today", self.get_today_matches_command))
+        app.add_handler(CommandHandler("stats", self.get_statistics_command))
         app.add_handler(CallbackQueryHandler(self.button_handler))
         
         # Добавляем обработчик ошибок
