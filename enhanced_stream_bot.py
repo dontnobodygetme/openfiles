@@ -425,7 +425,6 @@ class EnhancedStreamBot:
 /accounts - Управление аккаунтами
 /simulate - Запуск симуляции (ТОЛЬКО для ваших платформ!)
 /status - Статус системы
-/logs - Просмотр логов
 /help - Помощь
         """
         
@@ -433,12 +432,412 @@ class EnhancedStreamBot:
             [InlineKeyboardButton("📋 Аккаунты", callback_data="accounts"),
              InlineKeyboardButton("🎮 Симуляция", callback_data="simulate")],
             [InlineKeyboardButton("📊 Статус", callback_data="status"),
-             InlineKeyboardButton("📄 Логи", callback_data="logs")],
-            [InlineKeyboardButton("❓ Помощь", callback_data="help")]
+             InlineKeyboardButton("❓ Помощь", callback_data="help")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+    
+    async def accounts_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда управления аккаунтами"""
+        user_id = update.effective_user.id
+        
+        if not self.check_authorization(user_id):
+            await update.message.reply_text("❌ У вас нет доступа к этому боту")
+            return
+        
+        accounts = self.account_manager.get_active_accounts()
+        
+        text = f"📋 УПРАВЛЕНИЕ АККАУНТАМИ\n\n"
+        text += f"📊 Всего аккаунтов: {len(accounts)}\n"
+        text += f"⚡ Максимум одновременно: {self.viewer_simulator.max_concurrent}\n\n"
+        
+        if accounts:
+            text += "👥 Последние аккаунты:\n"
+            for i, acc in enumerate(accounts[:5], 1):
+                success_rate = 0
+                if acc['success_count'] + acc['error_count'] > 0:
+                    success_rate = (acc['success_count'] / (acc['success_count'] + acc['error_count'])) * 100
+                
+                text += f"{i}. {acc['username']} "
+                text += f"(✅{acc['success_count']} ❌{acc['error_count']} "
+                text += f"📈{success_rate:.1f}%)\n"
+            
+            if len(accounts) > 5:
+                text += f"... и еще {len(accounts) - 5} аккаунтов\n"
+        else:
+            text += "Аккаунты еще не добавлены"
+        
+        text += "\n⚠️ Используйте только для собственных платформ!"
+        
+        keyboard = [
+            [InlineKeyboardButton("➕ Добавить аккаунт", callback_data="add_account")],
+            [InlineKeyboardButton("📋 Показать все", callback_data="list_accounts")],
+            [InlineKeyboardButton("🧹 Очистить все", callback_data="clear_accounts")],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    
+    async def simulate_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда запуска симуляции"""
+        user_id = update.effective_user.id
+        
+        if not self.check_authorization(user_id):
+            await update.message.reply_text("❌ У вас нет доступа к этому боту")
+            return
+        
+        accounts = self.account_manager.get_active_accounts()
+        
+        if not accounts:
+            await update.message.reply_text(
+                "❌ Нет доступных аккаунтов для симуляции!\n\n"
+                "Сначала добавьте аккаунты через команду /accounts"
+            )
+            return
+        
+        warning_text = f"""
+⚠️ КРИТИЧЕСКИЕ ПРЕДУПРЕЖДЕНИЯ:
+
+1. Используйте ТОЛЬКО на СОБСТВЕННЫХ платформах!
+2. НЕ используйте на Twitch.tv, YouTube или других официальных сервисах
+3. Это может привести к блокировке аккаунтов
+4. Убедитесь, что у вас есть права на тестирование целевой платформы
+
+📊 Доступно аккаунтов: {len(accounts)}
+⚡ Максимум одновременно: {min(len(accounts), self.viewer_simulator.max_concurrent)}
+
+Продолжить только если это ВАША платформа:
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Это МОЯ платформа", callback_data="confirm_simulation")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(warning_text, reply_markup=reply_markup)
+    
+    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда статуса системы"""
+        user_id = update.effective_user.id
+        
+        if not self.check_authorization(user_id):
+            await update.message.reply_text("❌ У вас нет доступа к этому боту")
+            return
+        
+        accounts = self.account_manager.get_active_accounts()
+        active_sessions = len(self.viewer_simulator.active_sessions)
+        
+        # Статистика аккаунтов
+        total_success = sum(acc['success_count'] for acc in accounts)
+        total_errors = sum(acc['error_count'] for acc in accounts)
+        
+        status_text = f"""
+📊 СТАТУС СИСТЕМЫ
+
+👥 Аккаунты:
+• Всего: {len(accounts)}
+• Активных сессий: {active_sessions}
+• Успешных операций: {total_success}
+• Ошибок: {total_errors}
+
+⚙️ Система:
+• Максимум одновременно: {self.viewer_simulator.max_concurrent}
+• Максимальная длительность: {self.viewer_simulator.max_duration}с
+• Статус: ✅ Работает
+
+⚠️ Используйте ответственно!
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Обновить", callback_data="status")],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(status_text, reply_markup=reply_markup)
+    
+    async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик нажатий кнопок"""
+        query = update.callback_query
+        await query.answer()
+        
+        user_id = query.from_user.id
+        
+        if not self.check_authorization(user_id):
+            await query.edit_message_text("❌ У вас нет доступа к этому боту")
+            return
+        
+        data = query.data
+        
+        # Главное меню
+        if data == "main_menu":
+            await self.start_command(update, context)
+        
+        # Управление аккаунтами
+        elif data == "accounts":
+            await self.accounts_command(update, context)
+        
+        elif data == "add_account":
+            self.user_states[user_id] = "waiting_for_account"
+            await query.edit_message_text(
+                "➕ ДОБАВЛЕНИЕ АККАУНТА\n\n"
+                "Отправьте данные аккаунта в формате:\n"
+                "`логин:пароль`\n\n"
+                "Пример: `myuser123:mypassword456`\n\n"
+                "⚠️ ВАЖНО: Добавляйте только аккаунты для собственных платформ!\n\n"
+                "Отправьте /cancel для отмены"
+            )
+        
+        elif data == "list_accounts":
+            accounts = self.account_manager.get_active_accounts()
+            
+            if not accounts:
+                text = "📋 Список аккаунтов пуст"
+            else:
+                text = f"📋 ВСЕ АККАУНТЫ ({len(accounts)})\n\n"
+                for i, acc in enumerate(accounts, 1):
+                    success_rate = 0
+                    total_ops = acc['success_count'] + acc['error_count']
+                    if total_ops > 0:
+                        success_rate = (acc['success_count'] / total_ops) * 100
+                    
+                    last_used = acc['last_used'] or "Никогда"
+                    if acc['last_used']:
+                        last_used = "Недавно"
+                    
+                    text += f"{i}. **{acc['username']}**\n"
+                    text += f"   ✅ Успешно: {acc['success_count']}\n"
+                    text += f"   ❌ Ошибок: {acc['error_count']}\n"
+                    text += f"   📈 Успешность: {success_rate:.1f}%\n"
+                    text += f"   🕒 Последнее использование: {last_used}\n\n"
+            
+            keyboard = [
+                [InlineKeyboardButton("➕ Добавить аккаунт", callback_data="add_account")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="accounts")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(text, reply_markup=reply_markup)
+        
+        elif data == "clear_accounts":
+            keyboard = [
+                [InlineKeyboardButton("✅ Да, очистить ВСЕ", callback_data="confirm_clear")],
+                [InlineKeyboardButton("❌ Отмена", callback_data="accounts")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "⚠️ ВНИМАНИЕ!\n\n"
+                "Вы действительно хотите удалить ВСЕ аккаунты?\n"
+                "Это действие нельзя отменить!",
+                reply_markup=reply_markup
+            )
+        
+        elif data == "confirm_clear":
+            # Очистка всех аккаунтов
+            import os
+            if os.path.exists(self.account_manager.db_path):
+                conn = sqlite3.connect(self.account_manager.db_path)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM accounts")
+                conn.commit()
+                conn.close()
+            
+            await query.edit_message_text(
+                "✅ Все аккаунты удалены!\n\n"
+                "Теперь можно добавить новые аккаунты.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ Добавить аккаунт", callback_data="add_account")],
+                    [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+                ])
+            )
+        
+        # Симуляция
+        elif data == "simulate":
+            await self.simulate_command(update, context)
+        
+        elif data == "confirm_simulation":
+            self.user_states[user_id] = "waiting_for_url"
+            await query.edit_message_text(
+                "🌐 ВВЕДИТЕ URL СТРИМА\n\n"
+                "Отправьте URL вашей платформы для тестирования:\n"
+                "Пример: `https://your-platform.com/stream/gena_gensh`\n\n"
+                "⚠️ ТОЛЬКО для собственных платформ!\n"
+                "НЕ Twitch, YouTube, Facebook и т.д.\n\n"
+                "Отправьте /cancel для отмены"
+            )
+        
+        # Выбор количества зрителей
+        elif data.startswith("viewers_"):
+            viewer_count = int(data.split("_")[1])
+            user_state = self.user_states.get(user_id, {})
+            user_state["viewer_count"] = viewer_count
+            self.user_states[user_id] = user_state
+            
+            keyboard = [
+                [InlineKeyboardButton("🚀 ЗАПУСТИТЬ", callback_data="start_simulation")],
+                [InlineKeyboardButton("🔢 Изменить количество", callback_data="change_viewers")],
+                [InlineKeyboardButton("❌ Отмена", callback_data="cancel")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"✅ Параметры симуляции:\n\n"
+                f"🌐 URL: {user_state.get('url', 'Не указан')}\n"
+                f"👥 Количество зрителей: {viewer_count}\n"
+                f"⏱️ Длительность: 5 минут\n\n"
+                f"⚠️ ВНИМАНИЕ: Убедитесь, что это ваша платформа!",
+                reply_markup=reply_markup
+            )
+        
+        elif data == "custom_viewers":
+            user_state = self.user_states.get(user_id, {})
+            user_state["state"] = "waiting_custom_viewers"
+            self.user_states[user_id] = user_state
+            
+            accounts_count = len(self.account_manager.get_active_accounts())
+            max_viewers = min(accounts_count, self.viewer_simulator.max_concurrent)
+            
+            await query.edit_message_text(
+                f"� УКАЖИТЕ КОЛИЧЕСТВО ЗРИТЕЛЕЙ\n\n"
+                f"Введите число от 1 до {max_viewers}\n\n"
+                f"📊 Доступно аккаунтов: {accounts_count}\n"
+                f"⚡ Максимум системы: {self.viewer_simulator.max_concurrent}\n\n"
+                f"Отправьте /cancel для отмены"
+            )
+        
+        elif data == "change_viewers":
+            user_state = self.user_states.get(user_id, {})
+            url = user_state.get('url', '')
+            
+            # Возвращаемся к выбору количества зрителей
+            self.user_states[user_id] = {"state": "selecting_viewers", "url": url}
+            
+            accounts_count = len(self.account_manager.get_active_accounts())
+            max_viewers = min(accounts_count, self.viewer_simulator.max_concurrent)
+            
+            keyboard = [
+                [InlineKeyboardButton(f"👥 Все ({accounts_count})", callback_data=f"viewers_{accounts_count}")],
+                [InlineKeyboardButton(f"🎯 Половина ({accounts_count//2})", callback_data=f"viewers_{accounts_count//2}")],
+                [InlineKeyboardButton(f"� Максимум ({max_viewers})", callback_data=f"viewers_{max_viewers}")],
+                [InlineKeyboardButton("🔢 Указать количество", callback_data="custom_viewers")],
+                [InlineKeyboardButton("❌ Отмена", callback_data="cancel")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"👥 Выберите количество зрителей:\n\n"
+                f"📊 Доступно аккаунтов: {accounts_count}\n"
+                f"⚡ Максимум одновременно: {max_viewers}",
+                reply_markup=reply_markup
+            )
+        
+        elif data == "start_simulation":
+            user_state = self.user_states.get(user_id, {})
+            url = user_state.get('url')
+            viewer_count = user_state.get('viewer_count')
+            
+            if not url or not viewer_count:
+                await query.edit_message_text("❌ Ошибка: неполные данные для симуляции")
+                return
+            
+            # Запуск симуляции
+            await query.edit_message_text(
+                f"🚀 ЗАПУСК СИМУЛЯЦИИ...\n\n"
+                f"🌐 URL: {url}\n"
+                f"👥 Зрителей: {viewer_count}\n"
+                f"⏱️ Длительность: 5 минут\n\n"
+                f"📊 Симуляция запущена в фоновом режиме.\n"
+                f"Используйте /status для отслеживания прогресса."
+            )
+            
+            # Получаем аккаунты для симуляции
+            accounts = self.account_manager.get_active_accounts(limit=viewer_count)
+            
+            # Запускаем симуляцию в фоне
+            asyncio.create_task(self._run_simulation_background(user_id, accounts, url, query.message.chat_id, context))
+            
+            # Сбрасываем состояние
+            self.user_states.pop(user_id, None)
+        
+        # Статус
+        elif data == "status":
+            await self.status_command(update, context)
+        
+        # Помощь
+        elif data == "help":
+            help_text = """
+❓ ПОМОЩЬ
+
+Этот бот создан для образовательных целей и тестирования СОБСТВЕННЫХ платформ.
+
+🔸 /start - Главное меню
+🔸 /accounts - Управление аккаунтами
+🔸 /simulate - Запуск симуляции
+🔸 /status - Статус системы
+
+📋 Добавление аккаунтов:
+Используйте формат: логин:пароль
+Пример: user123:pass456
+
+⚠️ ВАЖНО:
+• НЕ используйте на официальных платформах
+• Может нарушать Terms of Service
+• Используйте только на собственных сервисах
+• Для образовательных целей
+
+💡 Рекомендации:
+• Создавайте качественный контент
+• Используйте легальные методы продвижения
+• Взаимодействуйте с реальной аудиторией
+            """
+            
+            keyboard = [
+                [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(help_text, reply_markup=reply_markup)
+        
+        # Отмена
+        elif data == "cancel":
+            self.user_states.pop(user_id, None)
+            await query.edit_message_text(
+                "❌ Операция отменена",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+                ])
+            )
+    
+    async def _run_simulation_background(self, user_id: int, accounts: list, url: str, chat_id: int, context):
+        """Запуск симуляции в фоновом режиме с уведомлением о результатах"""
+        try:
+            stats = await self.viewer_simulator.start_mass_simulation(accounts, url, user_id, 300)
+            
+            # Отправка результатов
+            result_text = f"""
+✅ СИМУЛЯЦИЯ ЗАВЕРШЕНА
+
+📊 Результаты:
+• Всего запущено: {stats['total']}
+• Успешно: {stats['success']}
+• Неудачно: {stats['failed']}
+• Ошибок: {stats['errors']}
+• Длительность: {stats['duration']}с
+
+🌐 URL: {url}
+            """
+            
+            # Отправляем результат в чат
+            await context.bot.send_message(chat_id=chat_id, text=result_text)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в фоновой симуляции: {e}")
+            error_text = f"❌ Ошибка при выполнении симуляции: {str(e)}"
+            await context.bot.send_message(chat_id=chat_id, text=error_text)
     
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка текстового ввода в зависимости от состояния пользователя"""
@@ -448,9 +847,59 @@ class EnhancedStreamBot:
             return
         
         user_state = self.user_states.get(user_id)
+        text = update.message.text.strip()
         
-        if user_state == "waiting_for_url":
-            stream_url = update.message.text.strip()
+        # Обработка добавления аккаунта в формате логин:пароль
+        if user_state == "waiting_for_account":
+            if ":" not in text:
+                await update.message.reply_text(
+                    "❌ Неверный формат!\n\n"
+                    "Используйте формат: `логин:пароль`\n"
+                    "Пример: `myuser123:mypassword456`\n\n"
+                    "Или отправьте /cancel для отмены"
+                )
+                return
+            
+            try:
+                username, password = text.split(":", 1)
+                username = username.strip()
+                password = password.strip()
+                
+                if not username or not password:
+                    await update.message.reply_text("❌ Логин и пароль не могут быть пустыми!")
+                    return
+                
+                # Добавляем аккаунт
+                success = self.account_manager.add_account(username, password)
+                
+                if success:
+                    accounts_count = len(self.account_manager.get_active_accounts())
+                    await update.message.reply_text(
+                        f"✅ Аккаунт `{username}` успешно добавлен!\n\n"
+                        f"📊 Всего аккаунтов: {accounts_count}\n\n"
+                        "Хотите добавить еще один аккаунт?",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("➕ Добавить еще", callback_data="add_account")],
+                            [InlineKeyboardButton("📋 Показать все", callback_data="list_accounts")],
+                            [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+                        ])
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"❌ Аккаунт `{username}` уже существует!\n"
+                        "Попробуйте другой логин."
+                    )
+                
+                # Сбрасываем состояние
+                self.user_states.pop(user_id, None)
+                
+            except Exception as e:
+                logger.error(f"Ошибка при добавлении аккаунта: {e}")
+                await update.message.reply_text("❌ Произошла ошибка при добавлении аккаунта")
+        
+        # Обработка ввода URL стрима
+        elif user_state == "waiting_for_url":
+            stream_url = text
             
             # Валидация URL
             if not stream_url.startswith(('http://', 'https://')):
@@ -469,14 +918,25 @@ class EnhancedStreamBot:
                 )
                 return
             
-            # Сохраняем URL и переходим к выбору параметров
-            self.user_states[user_id] = {"state": "configuring", "url": stream_url}
+            # Сохраняем URL и переходим к выбору количества зрителей
+            self.user_states[user_id] = {"state": "selecting_viewers", "url": stream_url}
             
             accounts_count = len(self.account_manager.get_active_accounts())
+            max_viewers = min(accounts_count, self.viewer_simulator.max_concurrent)
+            
+            if accounts_count == 0:
+                await update.message.reply_text(
+                    "❌ Нет доступных аккаунтов!\n"
+                    "Сначала добавьте аккаунты через команду /accounts"
+                )
+                self.user_states.pop(user_id, None)
+                return
             
             keyboard = [
-                [InlineKeyboardButton("🎯 Быстрый старт (5 мин)", callback_data="quick_start")],
-                [InlineKeyboardButton("⚙️ Настроить параметры", callback_data="configure_sim")],
+                [InlineKeyboardButton(f"👥 Все ({accounts_count})", callback_data=f"viewers_{accounts_count}")],
+                [InlineKeyboardButton(f"🎯 Половина ({accounts_count//2})", callback_data=f"viewers_{accounts_count//2}")],
+                [InlineKeyboardButton(f"🔥 Максимум ({max_viewers})", callback_data=f"viewers_{max_viewers}")],
+                [InlineKeyboardButton("🔢 Указать количество", callback_data="custom_viewers")],
                 [InlineKeyboardButton("❌ Отмена", callback_data="cancel")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -484,14 +944,84 @@ class EnhancedStreamBot:
             await update.message.reply_text(
                 f"✅ URL принят: {stream_url}\n\n"
                 f"📊 Доступно аккаунтов: {accounts_count}\n"
-                f"🎯 Выберите режим запуска:",
+                f"⚡ Максимум одновременно: {max_viewers}\n\n"
+                f"👥 Выберите количество зрителей:",
                 reply_markup=reply_markup
             )
         
+        # Обработка ввода пользовательского количества зрителей
+        elif user_state and isinstance(user_state, dict) and user_state.get("state") == "waiting_custom_viewers":
+            try:
+                viewer_count = int(text)
+                accounts_count = len(self.account_manager.get_active_accounts())
+                max_viewers = min(accounts_count, self.viewer_simulator.max_concurrent)
+                
+                if viewer_count <= 0:
+                    await update.message.reply_text("❌ Количество должно быть больше 0!")
+                    return
+                
+                if viewer_count > max_viewers:
+                    await update.message.reply_text(
+                        f"❌ Максимально допустимое количество: {max_viewers}\n"
+                        f"📊 Доступно аккаунтов: {accounts_count}\n"
+                        f"⚡ Лимит системы: {self.viewer_simulator.max_concurrent}"
+                    )
+                    return
+                
+                # Сохраняем количество и показываем финальные параметры
+                user_state["viewer_count"] = viewer_count
+                self.user_states[user_id] = user_state
+                
+                keyboard = [
+                    [InlineKeyboardButton("🚀 ЗАПУСТИТЬ", callback_data="start_simulation")],
+                    [InlineKeyboardButton("⚙️ Изменить параметры", callback_data="change_params")],
+                    [InlineKeyboardButton("❌ Отмена", callback_data="cancel")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(
+                    f"✅ Параметры симуляции:\n\n"
+                    f"🌐 URL: {user_state['url']}\n"
+                    f"👥 Количество зрителей: {viewer_count}\n"
+                    f"⏱️ Длительность: 5 минут\n\n"
+                    f"⚠️ ВНИМАНИЕ: Убедитесь, что это ваша платформа!",
+                    reply_markup=reply_markup
+                )
+                
+            except ValueError:
+                await update.message.reply_text("❌ Введите корректное число!")
+        
         else:
             await update.message.reply_text(
-                "❓ Неожиданный ввод. Используйте команды или кнопки."
+                "❓ Неожиданный ввод. Используйте команды или кнопки.\n\n"
+                "Доступные команды:\n"
+                "/start - Главное меню\n"
+                "/accounts - Управление аккаунтами\n"
+                "/status - Статус системы\n"
+                "/cancel - Отменить текущую операцию"
             )
+    
+    async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда отмены текущей операции"""
+        user_id = update.effective_user.id
+        
+        if not self.check_authorization(user_id):
+            await update.message.reply_text("❌ У вас нет доступа к этому боту")
+            return
+        
+        # Сбрасываем состояние пользователя
+        self.user_states.pop(user_id, None)
+        
+        keyboard = [
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "❌ Операция отменена\n\n"
+            "Все текущие действия прерваны.",
+            reply_markup=reply_markup
+        )
 
 def main():
     """Запуск улучшенного бота"""
@@ -500,6 +1030,8 @@ def main():
     if not token:
         logger.error("❌ Не найден TELEGRAM_BOT_TOKEN в переменных окружения")
         print("Создайте файл .env на основе .env.example")
+        print("Добавьте ваш токен бота в файл .env:")
+        print("TELEGRAM_BOT_TOKEN=your_bot_token_here")
         return
     
     # Создаем экземпляр бота
@@ -508,13 +1040,31 @@ def main():
     # Создаем приложение
     application = Application.builder().token(token).build()
     
-    # Добавляем обработчики
+    # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", bot.start_command))
+    application.add_handler(CommandHandler("accounts", bot.accounts_command))
+    application.add_handler(CommandHandler("simulate", bot.simulate_command))
+    application.add_handler(CommandHandler("status", bot.status_command))
+    application.add_handler(CommandHandler("cancel", bot.cancel_command))
+    
+    # Добавляем обработчик кнопок
+    application.add_handler(CallbackQueryHandler(bot.button_handler))
+    
+    # Добавляем обработчик текстовых сообщений (должен быть последним)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text_input))
-    # application.add_handler(CallbackQueryHandler(bot.button_handler))  # Будет добавлен в полной версии
     
     logger.info("🚀 Запуск улучшенного образовательного Stream Bot v2.0...")
     logger.warning("⚠️ Используйте ТОЛЬКО для образовательных целей и собственных платформ!")
+    
+    # Выводим информацию о запуске
+    print(f"🤖 Бот запущен успешно!")
+    print(f"📋 Доступные команды:")
+    print(f"   /start - Главное меню")
+    print(f"   /accounts - Управление аккаунтами")
+    print(f"   /simulate - Запуск симуляции")
+    print(f"   /status - Статус системы")
+    print(f"   /cancel - Отмена операции")
+    print(f"\n⚠️  ВАЖНО: Используйте только для собственных платформ!")
     
     # Запускаем бота
     application.run_polling()
