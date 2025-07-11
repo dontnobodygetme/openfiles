@@ -1,10 +1,5 @@
 python-telegram-bot==20.7
 aiohttp==3.9.1
-asyncio
 python-dotenv==1.0.0
-sqlite3
-logging
-json
-random
-time
-threading
+asyncio-throttle==1.0.2
+fake-useragent==1.4.0
