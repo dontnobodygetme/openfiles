@@ -30,8 +30,26 @@ def build_exe():
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
     
+    # Создание списка файлов данных
+    data_files = []
+    
+    # Проверяем наличие файлов перед добавлением
+    if Path('.env.example').exists():
+        data_files.append("('.env.example', '.')")
+        print("✅ Добавлен .env.example")
+    else:
+        print("⚠️ Файл .env.example не найден, пропускаем")
+    
+    if Path('README.md').exists():
+        data_files.append("('README.md', '.')")
+        print("✅ Добавлен README.md")
+    else:
+        print("⚠️ Файл README.md не найден, пропускаем")
+    
     # Создание spec файла
-    spec_content = """
+    datas_string = ",\n        ".join(data_files) if data_files else ""
+    
+    spec_content = f"""
 # -*- mode: python ; coding: utf-8 -*-
 
 block_cipher = None
@@ -41,8 +59,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('.env.example', '.'),
-        ('README.md', '.'),
+        {datas_string}
     ],
     hiddenimports=[
         'pyrogram',
@@ -111,13 +128,20 @@ exe = EXE(
         print(f"Исполняемый файл: {dist_dir / 'VK_Bot_Automation.exe'}")
         
         # Копирование дополнительных файлов
+        copied_files = []
+        
         if Path(".env.example").exists():
             shutil.copy(".env.example", dist_dir / ".env.example")
+            copied_files.append(".env.example")
         
         if Path("README.md").exists():
             shutil.copy("README.md", dist_dir / "README.md")
+            copied_files.append("README.md")
         
-        print("\nДополнительные файлы скопированы в папку dist/")
+        if copied_files:
+            print(f"\nДополнительные файлы скопированы: {', '.join(copied_files)}")
+        else:
+            print("\nДополнительные файлы не найдены для копирования")
         
     except subprocess.CalledProcessError as e:
         print(f"❌ Ошибка сборки: {e}")
