@@ -106,9 +106,19 @@ a = Analysis(
 # Добавляем специальные пути для pyrogram
 import pyrogram
 pyrogram_path = os.path.dirname(pyrogram.__file__)
-a.datas += [(f'pyrogram{os.sep}{f}', os.path.join(pyrogram_path, f), 'DATA') 
-           for f in os.listdir(pyrogram_path) 
-           if f.endswith('.py') or os.path.isdir(os.path.join(pyrogram_path, f))]
+for f in os.listdir(pyrogram_path):
+    if f.endswith('.py'):
+        a.datas += [(f'pyrogram{os.sep}{f}', os.path.join(pyrogram_path, f), 'DATA')]
+    elif os.path.isdir(os.path.join(pyrogram_path, f)) and not f.startswith('__pycache__'):
+        # Добавляем только подкаталоги, исключая __pycache__
+        for root, dirs, files in os.walk(os.path.join(pyrogram_path, f)):
+            # Исключаем __pycache__ из директорий
+            dirs[:] = [d for d in dirs if not d.startswith('__pycache__')]
+            for file in files:
+                if file.endswith('.py'):
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, pyrogram_path)
+                    a.datas += [(f'pyrogram{os.sep}{rel_path}', full_path, 'DATA')]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
