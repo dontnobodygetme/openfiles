@@ -1,0 +1,19 @@
+# Основные зависимости
+pyrogram
+selenium
+vk-api
+requests
+beautifulsoup4
+lxml
+fake-useragent
+undetected-chromedriver
+python-dotenv
+asyncio
+tgcrypto
+
+# Зависимости для сборки
+pyinstaller
+auto-py-to-exe
+
+# GUI зависимости
+tkinter

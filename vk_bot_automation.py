@@ -57,6 +57,7 @@ class VKTaskAutomation:
         self.vk = None
         self.current_task = None
         self.is_running = False
+        self.gui_callback = None  # Callback для обновления GUI
         
     async def init_telegram_client(self):
         """Инициализация Telegram клиента"""
@@ -317,18 +318,27 @@ class VKTaskAutomation:
         try:
             logger.info(f"Обрабатываю задание: {task_type} для {task_url}")
             
+            success = False
             if task_type == 'like':
-                return await self.perform_vk_like(task_url)
+                success = await self.perform_vk_like(task_url)
             elif task_type == 'repost':
-                return await self.perform_vk_repost(task_url)
+                success = await self.perform_vk_repost(task_url)
             elif task_type == 'comment':
-                return await self.perform_vk_comment(task_url)
+                success = await self.perform_vk_comment(task_url)
             else:
                 logger.error(f"Неизвестный тип задания: {task_type}")
-                return False
+                success = False
+            
+            # Вызов callback для обновления GUI
+            if self.gui_callback:
+                self.gui_callback(task_type, success)
+            
+            return success
                 
         except Exception as e:
             logger.error(f"Ошибка при обработке задания: {e}")
+            if self.gui_callback:
+                self.gui_callback(task_type, False)
             return False
     
     async def run_automation(self):
